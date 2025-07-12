@@ -1,1 +1,3 @@
-switch("path", "$projectDir/../src")
+# tests/config.nims
+--path:"$projectDir/../../src"
+--path:"$projectDir/.."

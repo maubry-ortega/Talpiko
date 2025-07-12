@@ -1,0 +1,28 @@
+nimble.develop
+nimble.paths
+# Ignorar ejecutables generados por Nim
+*.exe
+*.out
+*.app
+main  # o cualquier ejecutable con el mismo nombre que tu archivo .nim
+
+# Ignorar el directorio de caché de Nim
+nimcache/
+
+# Archivos temporales o de respaldo comunes
+*.bak
+*.tmp
+*.swp
+*.swo
+*~
+
+# Archivos de pruebas o binarios generados durante tests
+tests/*.exe
+tests/*.out
+tests/*  # Esto si quieres ignorar todos los generados dentro de la carpeta tests
+
+# Archivos de log (si los generas durante pruebas)
+*.log
+
+# Si usas un directorio `build/` para binarios
+build/
