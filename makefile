@@ -6,6 +6,7 @@ test-unit:
 	nim c -r tests/backend/core/logging_test.nim
 	nim c -r tests/backend/core/types_test.nim
 	nim c -r tests/backend/core/di/container_test.nim
+	nim c -r tests/backend/core/utils_test.nim
 
 test-integration:
 	nim c -r tests/backend/integration/core_integration_test.nim

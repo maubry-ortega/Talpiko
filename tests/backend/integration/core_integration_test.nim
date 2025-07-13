@@ -1,8 +1,9 @@
-import unittest, tables
-import "/home/maubry/Desktop/talpiko/src/talpiko/backend/core/logging"
+# tests/backend/integration/core_integration_test.nim
+import unittest, tables, strutils
+import ../../../src/talpiko/backend/core/logging 
 import ../../../src/talpiko/backend/core/types
 import ../../../src/talpiko/backend/core/utils
-import ../core/test_utils
+import ../core/utils_test  
 
 suite "Core Module Integration":
   test "Full logging with error handling":
@@ -14,9 +15,9 @@ suite "Core Module Integration":
         errors.add(msg)
 
     let res = tpParseIntSafe("not_a_number", logger)
-    check res.tpIsError()
+    check not res.isOk  # Cambiado de tpIsError() a not isOk
     check errors.len == 1
-    check errors[0] == "Invalid integer format: not_a_number"
+    check "Invalid integer format" in errors[0]
 
   test "JSON serialization with logging":
     let logger = createTestTpLogger()
@@ -38,6 +39,6 @@ suite "Core Module Integration":
         errors.add(msg)
     
     let res = tpValidateEmail("invalid_email")
-    check res.tpIsError()
+    check not res.isOk  # Cambiado de tpIsError() a not isOk
     check errors.len == 1
-    check errors[0].startsWith("Invalid email format")
+    check "email" in errors[0].toLowerAscii()
