@@ -91,4 +91,4 @@ suite "TpResult Type Tests":
     check resOk.kind == tpSuccess
     check resOk.value.isNil
     check resErr.kind == tpFailure
-    check resErr.value.isNil
+    check not resErr.error.isNil

@@ -1,21 +1,29 @@
-## from.nim
+## 📄 tp_conversions.nim
 ##
-## Módulo: Constructores Derivados (`tpFrom*`)
-## Sistema: Talpo / Talpiko - Core Types
+## 📌 Módulo: Constructores Derivados (`tpFrom*`)
+## 📦 Parte del sistema de tipos de Talpo / Talpiko
 ##
-## Responsabilidad:
-##   Facilitar la conversión de estructuras comunes (`Option`, `bool`, `ref Exception`)
-##   al sistema de tipos `TpResult[T]` para integrar sistemas externos o legados.
+## 🎯 Responsabilidad:
+##   Facilitar la conversión segura de estructuras comunes (`Option[T]`, `bool`, `ref Exception`)
+##   a `TpResult[T]` para adaptar sistemas legados o externos sin refactorizar lógica.
 ##
-## Características Clave:
-## - Adaptación de tipos externos a `TpResult[T]`
-## - Tipado genérico seguro
-## - Fallbacks personalizables
-## - Soporte para excepciones
+## 🔍 Características clave:
+## - Conversiones seguras sin panics
+## - Adaptadores tipados con `TpResult[T]`
+## - Fallbacks estándar para errores
+## - Manejo de excepciones funcional (`try/catch`)
 
-import std/[options, tables, strutils]
-import ../primitives/[tp_result, tp_error, tp_interfaces]
+# ─────────────────────────────────────────────────────────────────────────────
+# 📦 Importaciones necesarias
+# ─────────────────────────────────────────────────────────────────────────────
+
+import std/[options, tables]
+import ../primitives/[tp_result, tp_interfaces]
 import ./tp_failure, ./tp_success
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ⚙️ Configuración condicional de compilación
+# ─────────────────────────────────────────────────────────────────────────────
 
 when defined(release):
   {.push checks: off.}
@@ -31,13 +39,17 @@ proc tpFromOption*[T](
   fallbackMsg: string = "Valor ausente",
   fallbackCode: string = tpValidationErrorCode
 ): TpResult[T] {.inline.} =
-  ## Convierte un `Option[T]` a `TpResult[T]`
+  ## 🔄 Convierte un `Option[T]` a un `TpResult[T]`
   ##
-  ## Si `opt` es `some`, retorna éxito. Si es `none`, retorna error validado.
+  ## Si `opt` contiene un valor (`some`), se retorna `tpOk(valor)`.
+  ## Si no (`none`), retorna `tpErr[T](fallbackMsg, fallbackCode)`.
   ##
-  ## Ejemplo:
+  ## 🚨 El mensaje y código por defecto indican validación ausente.
+  ##
+  ## 🧪 runnableExamples:
   ## ```nim
-  ## let res = tpFromOption(findUser(), "Usuario no encontrado")
+  ## assert tpFromOption(some(123)).isSuccess
+  ## assert tpFromOption(none(int)).isFailure
   ## ```
   if opt.isSome:
     tpOk(opt.get())
@@ -54,13 +66,17 @@ proc tpFromBool*[T](
   errMsg: string = "Condición no cumplida",
   errCode: string = tpValidationErrorCode
 ): TpResult[T] {.inline.} =
-  ## Construye un `TpResult[T]` desde un valor booleano
+  ## 🧠 Convierte una condición booleana en un `TpResult[T]`
   ##
-  ## Si `cond` es `true`, retorna `value`. Si no, construye un error.
+  ## Si `cond` es `true`, retorna `tpOk(value)`.  
+  ## Si `cond` es `false`, genera un error con `tpErr[T](errMsg, errCode)`.
   ##
-  ## Ejemplo:
+  ## Ideal para validaciones simples y expresivas.
+  ##
+  ## 🧪 runnableExamples:
   ## ```nim
-  ## let res = tpFromBool(age > 18, user, "Debe ser mayor de edad")
+  ## assert tpFromBool(true, "ok").isSuccess
+  ## assert tpFromBool(false, "bad", "Falló").isFailure
   ## ```
   if cond:
     tpOk(value)
@@ -72,9 +88,19 @@ proc tpFromBool*[T](
 # ─────────────────────────────────────────────────────────────────────────────
 
 proc tpFromException*[T](e: ref Exception): TpResult[T] {.inline.} =
-  ## Convierte una excepción atrapada en un `TpResult[T]` de error
+  ## ⚠️ Convierte una excepción atrapada (`ref Exception`) en `TpResult[T]` fallido.
   ##
-  ## La excepción original se conserva en el campo `originalException`
+  ## El mensaje del error será el de la excepción.
+  ## El campo `originalException` conservará la excepción original para depuración.
+  ## El código usado por defecto es `tpInternalErrorCode` y la severidad `tpHigh`.
+  ##
+  ## 🧪 runnableExamples:
+  ## ```nim
+  ## let e = newException(ValueError, "boom")
+  ## let res = tpFromException[int](e)
+  ## assert res.isFailure
+  ## assert res.error.msg == "boom"
+  ## ```
   tpErr[T](
     msg = e.msg,
     code = tpInternalErrorCode,
@@ -87,17 +113,29 @@ proc tpFromException*[T](e: ref Exception): TpResult[T] {.inline.} =
 # ─────────────────────────────────────────────────────────────────────────────
 
 proc tpTryCatch*[T](op: proc (): T): TpResult[T] =
-  ## Ejecuta una operación que puede lanzar excepción, devolviendo `TpResult[T]`
+  ## 🌀 Ejecuta un bloque `proc () -> T` atrapando excepciones como `TpResult[T]`
   ##
-  ## Uso seguro para integrar APIs que aún no retornan `TpResult`.
+  ## Si la operación ejecuta correctamente, retorna `tpOk(valor)`.
+  ## Si lanza una excepción, se captura y se convierte con `tpFromException`.
   ##
-  ## Ejemplo:
+  ## Esta función permite integrar código no monádico de forma segura.
+  ##
+  ## 🧪 runnableExamples:
   ## ```nim
-  ## let res = tpTryCatch(proc(): int = parseInt(input))
+  ## proc f(): int = raise newException(IOError, "fail")
+  ## let res = tpTryCatch[int](f)
+  ## assert res.isFailure
+  ##
+  ## let res2 = tpTryCatch[int](proc() => 42)
+  ## assert res2 == tpOk(42)
   ## ```
   try:
     tpOk(op())
-  except Exception as e:
+  except CatchableError as e:
     tpFromException[T](e)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 🔚 Finaliza configuración
+# ─────────────────────────────────────────────────────────────────────────────
 
 {.pop.}

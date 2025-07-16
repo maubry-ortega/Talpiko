@@ -1,22 +1,7 @@
 ## monadic.nim
-##
 ## Módulo: Operadores Monádicos
 ## Sistema: Talpo / Talpiko - Result Monad
-##
-## Responsabilidad:
-##   Este módulo define operadores funcionales para la monada `TpResult[T]`,
-##   permitiendo composición fluida y segura de operaciones que pueden fallar.
-##
-## Características Clave:
-## - Operador `>>=` (bind) inspirado en Haskell
-## - Alternativa semántica `tpAndThen` estilo Elm
-## - Propagación automática de errores
-## - Soporte para funciones puras sin efectos colaterales
-## - Manejo estructurado de excepciones
-##
-## Requiere:
-## - `TpResult`, `TpResultError`
-## - Sistema de errores enriquecidos
+## Responsabilidad: Este módulo define operadores funcionales para la monada `TpResult[T]`, permitiendo composición fluida y segura de operaciones que pueden fallar.
 
 import ../primitives/[tp_result, tp_error, tp_interfaces]
 import std/tables
@@ -54,7 +39,7 @@ proc `>>=`*[T, R](
     except CatchableError as e:
       return TpResult[R](
         kind: tpFailure,
-        error: newTpResultError(
+        error: newTpResultErrorRef(
           msg = e.msg,
           code = "TP_MONAD_BIND_EXCEPTION",
           severity = tpHigh,
@@ -88,9 +73,4 @@ proc tpAndThen*[T, R](
 
   res >>= op
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 📌 Notas Técnicas
-# ─────────────────────────────────────────────────────────────────────────────
-# - Se recomienda mantener las funciones sin efectos colaterales (noSideEffect)
-# - Las excepciones lanzadas por `op` se capturan y se transforman en errores
-# - Ambos operadores son compatibles con tracing, logging y async wrappers
+{.pop.}
