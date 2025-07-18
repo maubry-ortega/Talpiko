@@ -47,13 +47,8 @@ proc tpErr*[T](
   ## - Maneja cualquier excepción lanzada al construir el error
   ## - Nunca lanza panics: usa fallback automático con severidad `tpCritical`
   ##
-  ## Uso típico:
-  ## ```nim
-  ## let result = tpErr[int]("Algo falló", "TP_FAIL", tpHigh)
-  ## ```
-  ##
   ## Argumentos:
-  ## - `msg`: mensaje descriptivo del error
+  ## - `msg`: mensaje descriptivo del error (no debe estar vacío)
   ## - `code`: código de error (por defecto: `TP_UNKNOWN`)
   ## - `severity`: nivel de severidad (default: `tpMedium`)
   ## - `context`: metadatos adicionales
@@ -61,16 +56,26 @@ proc tpErr*[T](
   ##
   ## Retorna:
   ## - `TpResult[T]` en estado `tpFailure` con error adjunto
+
+  var safeMsg = if msg.len > 0: msg else: "Mensaje de error vacío"
+  var safeCode = if code.len > 0: code else: tpDefaultErrorCode
+
   var errorObj: ref TpResultError
+
   try:
-    errorObj = newTpResultErrorRef(msg, code, severity, context, original)
+    errorObj = newTpResultErrorRef(safeMsg, safeCode, severity, context, original)
   except CatchableError as e:
-    ## Fallback extremo si falla incluso la creación del error
-    echo "Error creating error: " & e.msg
+    echo "[tp_failure] Error creating TpResultError: ", e.msg
+
+    var fallbackContext = context
+    fallbackContext["tp_fallback"] = "true"
+    fallbackContext["original_error"] = e.msg
+
     errorObj = newTpResultErrorRef(
-      "Error creating error: " & e.msg,
+      "Error creating TpResultError: " & e.msg,
       "TP_ERROR_FAILURE",
-      tpCritical
+      tpCritical,
+      fallbackContext
     )
 
   TpResult[T](
@@ -91,10 +96,6 @@ template tpFailure*[T](
   original: ref Exception = nil
 ): TpResult[T] =
   ## 🪄 Azúcar sintáctico para `tpErr[T]`, más legible y expresivo
-  ##
-  ## Ventajas:
-  ## - Más claro al expresar intencionalidad semántica (`tpFailure`)
-  ## - Ideal para proyectos donde se prioriza legibilidad
   ##
   ## Equivalente a:
   ## ```nim

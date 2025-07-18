@@ -1,41 +1,83 @@
 ## recover.nim
 ##
-## Módulo: tpRecover
-## Sistema: Talpo / Talpiko - TpResult Operations
+## 📦 Módulo: tpRecover
+## 🎯 Sistema: Talpo / Talpiko - TpResult Monad
 ##
-## Responsabilidad:
-##   Permitir el manejo seguro de errores mediante recuperación
-##   con un valor alternativo o función, sin lanzar excepciones.
+## Funciones de recuperación ante errores:
+## - `tpRecover`: valor por defecto
+## - `tpRecoverWith`: función generadora (lazy)
+## - `tpRecoverResult`: retorno alternativo tipo TpResult
 ##
-## Características Clave:
-## - Control seguro de errores sin panics
-## - Opciones funcionales y declarativas
-## - Útil en operaciones tolerantes a fallos
+## Uso: tolerancia a fallos sin panics ni excepciones
 
 import ../primitives/tp_result
+import ../primitives/tp_interfaces
+import ../primitives/tp_error
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 📦 Fallback directo: valor por defecto
+# ─────────────────────────────────────────────────────────────────────────────
 
 proc tpRecover*[T](res: TpResult[T], fallback: T): T {.inline.} =
-  ## Retorna el valor si es éxito o `fallback` si es error
+  ## Retorna `res.value` si es éxito, o `fallback` si es error.
+  ##
+  ## Ejemplo:
+  ## ```nim
+  ## let valor = getConfig().tpRecover("default")
+  ## ```
   if res.tpIsSuccess():
     res.value
   else:
     fallback
 
-proc tpRecoverWith*[T](res: TpResult[T], recovery: proc(): T): T {.inline.} =
-  ## Ejecuta una función si hay error para obtener valor alternativo
+# ─────────────────────────────────────────────────────────────────────────────
+# 💤 Fallback diferido (lazy)
+# ─────────────────────────────────────────────────────────────────────────────
+
+proc tpRecoverWith*[T](res: TpResult[T], recovery: proc(): T {.closure.}): T {.inline.} =
+  ## Ejecuta `recovery()` si hay error; retorna su resultado como fallback.
+  ##
+  ## Ejemplo:
+  ## ```nim
+  ## let valor = getUserById(id).tpRecoverWith(proc(): string = getCachedUser())
+  ## ```
   ##
   ## Ventajas:
-  ## - Lazy evaluation del valor de recuperación
+  ## - No se evalúa `recovery()` a menos que ocurra un fallo
+  ##
   if res.tpIsSuccess():
     res.value
   else:
     recovery()
 
-proc tpRecoverResult*[T](res: TpResult[T], recovery: proc(): TpResult[T]): TpResult[T] {.inline.} =
-  ## Ejecuta función de recuperación que retorna otro `TpResult`
+# ─────────────────────────────────────────────────────────────────────────────
+# 🔁 Fallback funcional: otro TpResult
+# ─────────────────────────────────────────────────────────────────────────────
+
+proc tpRecoverResult*[T](res: TpResult[T], recovery: proc(): TpResult[T] {.closure.}): TpResult[T] {.inline.} =
+  ## Si `res` es error, ejecuta `recovery()` para obtener un nuevo `TpResult`.
+  ## Si es éxito, se retorna `res` con su metadata original.
   ##
-  ## Útil cuando el fallback también puede fallar o ser complejo
+  ## Ejemplo:
+  ## ```nim
+  ## let res = getUser()
+  ##   .tpRecoverResult(proc() = getDefaultUser())
+  ## ```
   if res.tpIsSuccess():
-    res
+    # ✅ Se conserva metadata en éxito original
+    TpResult[T](kind: res.kind, value: res.value, metadata: res.metadata)
   else:
-    recovery()
+    try:
+      recovery()
+    except CatchableError as e:
+      # ⚠️ Fallback también falló (opcional: envolverlo en TpResult)
+      TpResult[T](
+        kind: tpFailureKind,
+        error: newTpResultErrorRef(
+          msg = "Recovery failed: " & e.msg,
+          code = "TP_RECOVERY_EXCEPTION",
+          severity = tpHigh,
+          original = e
+        ),
+        metadata: res.metadata
+      )

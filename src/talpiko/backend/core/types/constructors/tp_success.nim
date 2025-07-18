@@ -1,4 +1,4 @@
-## tp_success.nim
+## 📄 tp_success.nim
 ##
 ## 📘 Módulo: Constructores de Éxito (`tpOk`)
 ## 🔧 Sistema: Talpo / Talpiko - Core Types
@@ -10,15 +10,24 @@
 ## 🚀 Características:
 ## - Constructor `tpOk` inlineado
 ## - Alias `tpSuccess` estilo Rust pero con prefijo `tp`
-## - Preparado para trazabilidad y profiling
+## - Preparado para trazabilidad, validación y profiling
 ## - Diseño extensible y tipo-safe
 ##
 ## 📎 Estándar de Código:
 ## - Siempre usar prefijo `tp` (prohibido usar `Ok`)
 ## - Consistencia en toda la API pública de Talpiko
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 📦 Importaciones necesarias
+# ─────────────────────────────────────────────────────────────────────────────
+
 import ../primitives/tp_result
 import ../primitives/tp_interfaces
+import std/times
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ⚙️ Configuración condicional
+# ─────────────────────────────────────────────────────────────────────────────
 
 when defined(release):
   {.push checks: off.}
@@ -30,35 +39,48 @@ else:
 # ─────────────────────────────────────────────────────────────────────────────
 
 proc tpOk*[T](value: T): TpResult[T] {.inline.} =
-  ## Constructor principal para resultados exitosos.
+  ## 🛠️ Crea un `TpResult[T]` con estado exitoso.
   ##
-  ## Parámetros:
-  ## - `value`: Valor de tipo `T` que representa el éxito
+  ## 📥 Argumentos:
+  ## - `value` → valor del resultado exitoso (tipo `T`)
   ##
-  ## Ventajas:
-  ## - Alta performance (`inline`)
-  ## - No genera allocaciones
-  ## - Preparado para trazabilidad (cuando `-d:tpTrace`)
+  ## 📤 Retorna:
+  ## - `TpResult[T]` en estado `tpSuccessKind` con valor adjunto
   ##
-  ## Ejemplo:
+  ## 🧠 Características:
+  ## - Inlineado y sin allocs
+  ## - Preparado para trazabilidad con `-d:tpTrace`
+  ## - Compatible con `tpFailure`, `tpResult`, `tpTryCatch`, etc.
+  ##
+  ## 🧪 Ejemplo:
   ## ```nim
-  ## let resultado = tpOk(123)  # TpResult[int]
+  ## let r = tpOk(42)
+  ## assert r.isSuccess
   ## ```
+
+  when defined(tpStrictSuccess):
+    static: assert not T is ref or T isnot Nil, "tpOk: valor por referencia no puede ser nil"
+
   when defined(tpTrace):
     echo "[tpOk] => ", value
 
   TpResult[T](
     kind: tpSuccessKind,
-    value: value
+    value: value,
+    metadata: TpResultMetadata(creationTime: epochTime()) # opcional para trazabilidad
   )
 
 template tpSuccess*[T](value: T): TpResult[T] =
-  ## Alias semántico de `tpOk`, similar a `Ok` en Rust, pero con el estándar `tp`.
+  ## 🪄 Alias semántico de `tpOk`, estilo Rust pero con prefijo `tp`.
   ##
-  ## Uso:
+  ## Úsalo cuando prefieras claridad semántica:
   ## ```nim
-  ## let res = tpSuccess("todo bien")  # TpResult[string]
+  ## let x = tpSuccess("Listo")
   ## ```
   tpOk(value)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 🔚 Finaliza configuración condicional
+# ─────────────────────────────────────────────────────────────────────────────
 
 {.pop.}

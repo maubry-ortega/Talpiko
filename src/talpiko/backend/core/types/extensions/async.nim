@@ -1,71 +1,101 @@
-## async.nim
-##
-## Módulo: Extensiones Async/Await para TpResult
-## Sistema: Talpo / Talpiko - Core Types
-##
-## Responsabilidad:
-##   Este módulo proporciona integración nativa entre el sistema de tipos TpResult
-##   y operaciones asincrónicas usando `Future` y `await`, de forma segura y sin overhead.
-##
-## Características Clave:
-## - Compatibilidad directa con `async/await`
-## - Futuro tipado: `TpAsyncResult[T]`
-## - Manejo seguro de errores en contextos asincrónicos
-## - Cero coste en caminos exitosos (happy path)
-## - Preparado para ARC/ORC y threading
+import std/[asyncdispatch, tables]
+import ../constructors/[tp_success, tp_failure]
+import ../primitives/[tp_result, tp_error, tp_interfaces]
 
-when defined(nimHasArc):
-  import std/asyncdispatch
-  import ../constructors/[ok, err]
-  import ../primitives/result
+# ─────────────────────────────────────────────────────────────────────────────
+# 🧾 Alias Documental (NO usar como tipo de retorno en proc async)
+type
+  TpAsyncResult*[T] = Future[TpResult[T]]
 
-  # ─────────────────────────────────────────────────────────────────────────────
-  # 📦 Tipos Principales
-  # ─────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# 🧱 Primitivas de ejecución asíncrona
 
-  type
-    TpAsyncResult*[T] = Future[TpResult[T]]
-      ## Futuro tipado para operaciones que retornan `TpResult[T]` asincrónicamente
-      ##
-      ## Uso común:
-      ## ```nim
-      ## proc fetchData(): TpAsyncResult[int] = async:
-      ##   await sleepAsync(100)
-      ##   tpOk(200)
-      ## ```
+proc tpAwait*[T](fut: TpAsyncResult[T]): TpResult[T] {.inline.} =
+  ## Espera el resultado y retorna el valor TpResult.
+  let res = await fut
+  res
 
-  # ─────────────────────────────────────────────────────────────────────────────
-  # 🛠️ Integración Async/Await
-  # ─────────────────────────────────────────────────────────────────────────────
+proc tpAsync*[T](op: proc(): TpResult[T] {.gcsafe.}): Future[TpResult[T]] {.async.} =
+  ## Ejecuta una operación síncrona dentro de un contexto async y captura errores.
+  try:
+    return op()
+  except CatchableError as e:
+    return tpErr[T](
+      msg = "Exception in tpAsync: " & e.msg,
+      code = "TP_ASYNC_EXCEPTION",
+      severity = tpHigh
+    )
 
-  proc tpAwait*[T](fut: TpAsyncResult[T]): TpResult[T] {.inline.} =
-    ## Espera el resultado de una operación asincrónica y lo adapta a `TpResult`
-    ##
-    ## Características:
-    ## - Zero-cost en camino exitoso
-    ## - Propaga errores de forma segura
-    ##
-    ## Uso:
-    ## ```nim
-    ## let res = tpAwait(await fetchSomething())
-    ## if res.tpIsSuccess: echo res.tpUnsafeGet
-    ## ```
-    let res = await fut
-    if res.tpIsSuccess:
-      tpOk(res.tpUnsafeGet)
-    else:
-      tpErr[T](res.error)
+# ─────────────────────────────────────────────────────────────────────────────
+# 🔁 Encadenamiento Asíncrono con Result
 
-  proc tpAsync*[T](op: proc(): TpResult[T] {.gcsafe.}): TpAsyncResult[T] {.inline.} =
-    ## Convierte una operación síncrona en `async` retornando un `TpAsyncResult`
-    ##
-    ## Ventajas:
-    ## - Compatible con `async`/`await` de Nim
-    ## - Facilita transición de funciones sincrónicas a asincrónicas
-    ##
-    ## Ejemplo:
-    ## ```nim
-    ## let fut = tpAsync(proc(): TpResult[int] = tpOk(123))
-    ## echo (await fut).tpUnsafeGet
-    ## ```
-    asyncCheck op()  # No retorna directamente, solo lanza async
+proc tpAsyncFlatMap*[T, R](
+  res: TpResult[T],
+  op: proc(x: T): Future[TpResult[R]] {.closure.}
+): Future[TpResult[R]] {.async.} =
+  ## Encadena un resultado sincrónico a una operación asincrónica.
+  if res.tpIsSuccess():
+    try:
+      let val = res.tpUnsafeGet()
+      return await op(val)
+    except CatchableError as e:
+      return tpErr[R](
+        msg = "Exception in tpAsyncFlatMap: " & e.msg,
+        code = "TP_ASYNC_FLATMAP_EXCEPTION",
+        severity = tpHigh
+      )
+  else:
+    # ⚠️ Aquí estaba el error
+    return TpResult[R](
+      kind: tpFailureKind,
+      error: res.error,
+      metadata: res.metadata
+    )
+
+
+proc tpThenAsync*[T, R](
+  res: TpResult[T],
+  op: proc(x: T): Future[TpResult[R]] {.closure.}
+): Future[TpResult[R]] {.inline.} =
+  ## Alias para tpAsyncFlatMap
+  tpAsyncFlatMap(res, op)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 🔗 Encadenamiento Asíncrono Monádico
+
+proc tpBindAsync*[T, R](
+  res: Future[TpResult[T]],
+  op: proc(x: T): Future[TpResult[R]] {.closure, gcsafe.}
+): Future[TpResult[R]] {.async.} =
+  ## Encadena una operación asincrónica que devuelve TpResult dentro de Future.
+  let awaited = await res
+  if awaited.tpIsSuccess():
+    try:
+      return await op(awaited.tpUnsafeGet())
+    except CatchableError as e:
+      when defined(tpTrace):
+        echo "[tpBindAsync Exception] ", e.name, ": ", e.msg
+      return TpResult[R](
+        kind: tpFailureKind,
+        error: newTpResultErrorRef(
+          msg = e.msg,
+          code = "TP_ASYNC_BIND_EXCEPTION",
+          severity = tpHigh,
+          context = initTable[string, string](),
+          original = e
+        ),
+        metadata: awaited.metadata
+      )
+  else:
+    return TpResult[R](
+      kind: tpFailureKind,
+      error: awaited.error,
+      metadata: awaited.metadata
+    )
+
+proc tpAndThenAsync*[T, R](
+  res: Future[TpResult[T]],
+  op: proc(x: T): Future[TpResult[R]] {.closure, gcsafe.}
+): Future[TpResult[R]] {.async.} =
+  ## Alias semántico para tpBindAsync
+  tpBindAsync(res, op)

@@ -52,12 +52,12 @@ type
 
   TpResult*[T] = object
     ## 🔄 Monad funcional que encapsula éxito o error
+    metadata*: TpResultMetadata
     case kind*: TpResultKind
     of tpSuccessKind:
       value*: T
     of tpFailureKind:
       error*: ref TpResultError
-      metadata*: TpResultMetadata
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ⚙️ Configuración: Códigos estándar de error
@@ -90,6 +90,25 @@ proc tpUnwrap*[T](res: TpResult[T]): T =
     else:
       raise newException(ValueError, res.error.msg)
   res.value
+
+proc tpUnwrapOr*[T](res: TpResult[T], fallback: T): T {.inline.} =
+  ## 🔓 Retorna el valor si es éxito, o `fallback` si es error.
+  ##
+  ## Alternativa segura a `tpUnwrap` que evita lanzar excepciones.
+  ##
+  ## 🧪 Ejemplo:
+  ## ```nim
+  ## let resOk = tpOk(42)
+  ## let resErr = tpErr[int]("fallo")
+  ##
+  ## echo resOk.tpUnwrapOr(0)   # 42
+  ## echo resErr.tpUnwrapOr(0)  # 0
+  ## ```
+  if res.tpIsSuccess():
+    res.value
+  else:
+    fallback
+
 
 proc tpGetOrDefault*[T](res: TpResult[T], fallback: T): T {.inline.} =
   ## 🔁 Retorna el valor si es éxito, o `fallback` si es error

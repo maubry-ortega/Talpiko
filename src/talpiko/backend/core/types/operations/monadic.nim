@@ -1,7 +1,16 @@
 ## monadic.nim
-## Módulo: Operadores Monádicos
-## Sistema: Talpo / Talpiko - Result Monad
-## Responsabilidad: Este módulo define operadores funcionales para la monada `TpResult[T]`, permitiendo composición fluida y segura de operaciones que pueden fallar.
+##
+## 📦 Módulo: Operadores Monádicos para TpResult
+## 🔧 Sistema: Talpo / Talpiko - Monad Core
+##
+## 🎯 Responsabilidad:
+##   - Definir operadores de composición (`tpBind`, `tpAndThen`)
+##   - Permitir encadenamiento seguro de operaciones con posible fallo
+##
+## 🚀 Características:
+## - Captura errores de ejecución de forma segura
+## - Preserva metadata
+## - Compatible con funciones *closure* y `inline`
 
 import ../primitives/[tp_result, tp_error, tp_interfaces]
 import std/tables
@@ -12,31 +21,30 @@ else:
   {.push stackTrace: on.}
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 🧮 Operador Monádico (bind)
+# 🔗 Operador Monádico: `tpBind`
 # ─────────────────────────────────────────────────────────────────────────────
 
-proc `>>=`*[T, R](
+proc tpBind*[T, R](
   res: TpResult[T],
-  op: proc(x: T): TpResult[R] {.noSideEffect.}
+  op: proc(x: T): TpResult[R] {.closure.}
 ): TpResult[R] {.inline.} =
-  ## Operador `bind` para composición de operaciones que pueden fallar.
+  ## Encadena una operación que devuelve un `TpResult[R]`.
   ##
-  ## Comportamiento:
-  ## - Si `res` es éxito: aplica `op` al valor y retorna su resultado
-  ## - Si `res` es error: retorna el mismo error sin ejecutar `op`
+  ## Ejemplo:
+  ## ```nim
+  ## let res = tpOk(1).tpBind(proc(x: int): TpResult[string] = tpOk($x))
+  ## ```
   ##
-  ## Seguridad:
-  ## - Usa `unsafeGet` sólo si `isSuccess`, garantizado por short-circuit
-  ## - Captura excepciones lanzadas por `op`, envolviéndolas en `TpResultError`
-  ##
-  ## Rendimiento:
-  ## - Ideal para composición en pipelines funcionales
-  ## - Inlineado, cero branching adicional en happy path
+  ## - Si `res` es éxito: se ejecuta `op(x)` sobre el valor
+  ## - Si falla: se propaga el error original con metadata
+  ## - Si `op` lanza excepción: se transforma en `TpResultError`
 
   if likely(res.tpIsSuccess()):
     try:
       return op(res.tpUnsafeGet())
     except CatchableError as e:
+      when defined(tpTrace):
+        echo "[tpBind Exception] ", e.name, ": ", e.msg
       return TpResult[R](
         kind: tpFailureKind,
         error: newTpResultErrorRef(
@@ -45,32 +53,52 @@ proc `>>=`*[T, R](
           severity = tpHigh,
           context = initTable[string, string](),
           original = e
-        )
+        ),
+        metadata: res.metadata
       )
   else:
     return TpResult[R](
       kind: tpFailureKind,
-      error: res.error
+      error: res.error,
+      metadata: res.metadata
     )
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 📚 Alternativa Semántica: `tpAndThen`
+# 🧾 Alias Semántico: `tpAndThen`
 # ─────────────────────────────────────────────────────────────────────────────
 
 proc tpAndThen*[T, R](
   res: TpResult[T],
-  op: proc(x: T): TpResult[R]
+  op: proc(x: T): TpResult[R] {.closure.}
 ): TpResult[R] {.inline.} =
-  ## Versión más legible del operador `bind`
+  ## Alias semántico de `tpBind`, para estilo más expresivo.
   ##
-  ## Semántica:
-  ## - `res.tpAndThen(f)` es equivalente a `res >>= f`
-  ## - Más expresiva en entornos donde `>>=` puede ser menos legible
+  ## Uso típico:
+  ## ```nim
+  ## let resultado = res.tpAndThen(proc(x) = ...)
+  ## ```
   ##
-  ## Recomendado cuando:
-  ## - Se prioriza claridad sobre concisión
-  ## - El operador `>>=` resulta confuso en proyectos nuevos
+  ## Beneficios:
+  ## - Más claridad que el operador `tpBind`
+  ## - Mejor para flujos de datos extensos
 
-  res >>= op
+  tpBind(res, op)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 🛠️ Alias de operador: `>>==` como reemplazo simbólico
+# ─────────────────────────────────────────────────────────────────────────────
+
+proc `>>==`*[T, R](
+  res: TpResult[T],
+  op: proc(x: T): TpResult[R] {.closure.}
+): TpResult[R] {.inline.} =
+  ## Operador alternativo más claro que `>>=`, igual funcionalidad.
+  ##
+  ## Ejemplo:
+  ## ```nim
+  ## let res = tpOk(1) >>== proc(x: int): TpResult[string] = tpOk($x)
+  ## ```
+
+  tpBind(res, op)
 
 {.pop.}

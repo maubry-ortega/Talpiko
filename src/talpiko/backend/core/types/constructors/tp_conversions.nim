@@ -18,7 +18,7 @@
 # ─────────────────────────────────────────────────────────────────────────────
 
 import std/[options, tables]
-import ../primitives/[tp_result, tp_interfaces]
+import ../primitives/[tp_result, tp_interfaces, tp_error]
 import ./tp_failure, ./tp_success
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -38,7 +38,7 @@ proc tpFromOption*[T](
   opt: Option[T],
   fallbackMsg: string = "Valor ausente",
   fallbackCode: string = tpValidationErrorCode
-): TpResult[T] {.inline.} =
+): TpResult[T] {.inline, noSideEffect.} =
   ## 🔄 Convierte un `Option[T]` a un `TpResult[T]`
   ##
   ## Si `opt` contiene un valor (`some`), se retorna `tpOk(valor)`.
@@ -52,7 +52,7 @@ proc tpFromOption*[T](
   ## assert tpFromOption(none(int)).isFailure
   ## ```
   if opt.isSome:
-    tpOk(opt.get())
+    tpOk[T](opt.get())
   else:
     tpErr[T](fallbackMsg, fallbackCode)
 
@@ -65,7 +65,7 @@ proc tpFromBool*[T](
   value: T,
   errMsg: string = "Condición no cumplida",
   errCode: string = tpValidationErrorCode
-): TpResult[T] {.inline.} =
+): TpResult[T] {.inline, noSideEffect.} =
   ## 🧠 Convierte una condición booleana en un `TpResult[T]`
   ##
   ## Si `cond` es `true`, retorna `tpOk(value)`.  
@@ -87,24 +87,17 @@ proc tpFromBool*[T](
 # ⚠️ Conversión desde Exception
 # ─────────────────────────────────────────────────────────────────────────────
 
-proc tpFromException*[T](e: ref Exception): TpResult[T] {.inline.} =
-  ## ⚠️ Convierte una excepción atrapada (`ref Exception`) en `TpResult[T]` fallido.
-  ##
-  ## El mensaje del error será el de la excepción.
-  ## El campo `originalException` conservará la excepción original para depuración.
-  ## El código usado por defecto es `tpInternalErrorCode` y la severidad `tpHigh`.
-  ##
-  ## 🧪 runnableExamples:
-  ## ```nim
-  ## let e = newException(ValueError, "boom")
-  ## let res = tpFromException[int](e)
-  ## assert res.isFailure
-  ## assert res.error.msg == "boom"
-  ## ```
+proc tpFromException*[T](
+  e: ref Exception,
+  code: string = "EXCEPTION",
+  severity: TpErrorSeverity = tpHigh,
+  context: Table[string, string] = initTable[string, string]()
+): TpResult[T] =
   tpErr[T](
     msg = e.msg,
-    code = tpInternalErrorCode,
-    severity = tpHigh,
+    code = code,
+    severity = severity,
+    context = context,
     original = e
   )
 
