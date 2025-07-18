@@ -1,103 +1,108 @@
 # 📁 Archivo: src/talpiko/backend/core/prueba_funcionalidades.nim
-# 🎯 Demostración de flujo monádico + async en Talpo/Talpiko
+# 🎯 Demostración mejorada de flujo monádico + async en Talpo/Talpiko
 
 import std/asyncdispatch
 import std/strutils
+import std/strformat
+import std/unittest
 import ./types
-import ./types/extensions/async
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 📦 Validación tipada del ID del usuario
+# 🛠️ Constantes y tipos auxiliares
+# ─────────────────────────────────────────────────────────────────────────────
+
+const
+  DEFAULT_USER = "UNKNOWN_USER"
+  USER_PREFIX = "User#"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 📦 Validación tipada del ID del usuario (mejorada)
 # ─────────────────────────────────────────────────────────────────────────────
 
 proc validateUserId(id: string): TpResult[int] =
-  ## Intenta convertir un string a ID entero positivo.
-  ## Devuelve error si no es convertible o si es negativo/cero.
+  ## Versión mejorada usando tipos Talpiko
   try:
-    let num = parseInt(id)
+    let num = id.parseInt()
     if num <= 0:
-      return tpErr[int]("ID must be positive", code = "INVALID_ID")
+      let msg = fmt"El ID de usuario debe ser positivo (se recibió: {num})"
+      return tpErr[int](msg, code = "INVALID_ID", severity = TpErrorSeverity.tpMedium)
     tpOk(num)
-  except ValueError as e:
-    tpFromException[int](e, code = "PARSE_ERROR")
+  except ValueError:
+    let msg = fmt"No se pudo convertir el ID '{id}' a número"
+    tpErr[int](msg, code = "PARSE_ERROR", severity = TpErrorSeverity.tpHigh)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 📦 Simulación asincrónica de acceso a base de datos
+# 📦 Simulación asincrónica de acceso a base de datos (mejorada)
 # ─────────────────────────────────────────────────────────────────────────────
 
-proc fetchUserFromDb(id: int): Future[TpResult[string]] =
-  ## Simula la consulta a una base de datos.
-  ## Falla si el ID es 42 (usuario no encontrado).
-  tpAsync(proc(): TpResult[string] =
-    if id == 42:
-      tpErr[string]("User not found", code = "NOT_FOUND", severity = tpMedium)
-    else:
-      tpOk("User#" & $id)
-  )
+proc fetchUserFromDb(id: int): Future[TpResult[string]] {.async.} =
+  ## Versión mejorada usando convenciones Talpiko
+  await sleepAsync(100)  # Simula latencia de red
+  
+  if id == 42:
+    let msg = fmt"Usuario con ID {id} no encontrado en la base de datos"
+    return tpErr[string](msg, code = "NOT_FOUND", severity = TpErrorSeverity.tpHigh)
+  
+  tpOk(USER_PREFIX & $id)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 📦 Formateo de nombre
+# 📦 Formateo de nombre (mejorado)
 # ─────────────────────────────────────────────────────────────────────────────
 
 proc formatUser(name: string): string =
-  ## Devuelve el nombre en mayúsculas.
+  ## Versión mejorada con validación adicional
+  if name.len == 0:
+    return DEFAULT_USER
   name.toUpperAscii()
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 🧠 Lógica principal: validar → buscar → formatear
+# 🧠 Lógica principal mejorada (usando operadores Talpiko)
 # ─────────────────────────────────────────────────────────────────────────────
 
 proc getUserDisplay(idStr: string): Future[string] {.async.} =
-  ## Flujo completo con manejo monádico y asincrónico:
-  ## 1. Valida ID
-  ## 2. Consulta usuario (async)
-  ## 3. Formatea nombre
-  ## 4. Recupera con valor por defecto si ocurre error
+  ## Versión mejorada usando operadores monádicos Talpiko
+  
+  # 1️⃣ Validación con logging contextual
+  let userId = validateUserId(idStr)
+    .tpTap(proc(id: int) = echo fmt"[DEBUG] Validación exitosa para ID: {id}")
+    .tpTapError(proc(e: ref TpResultError) = 
+      echo fmt"[ERROR] Fallo en validación: {e.msg} (código: {e.code})")
+  
+  if userId.tpIsFailure():
+    return DEFAULT_USER
 
-  # 1️⃣ Validación
-  let validated = validateUserId(idStr)
+  # 2️⃣ Consulta asincrónica con manejo de errores
+  let dbResult = await userId.tpThenAsync(fetchUserFromDb)
+  
+  let user = dbResult
+    .tpTap(proc(name: string) = echo fmt"[DEBUG] Usuario obtenido: {name}")
+    .tpTapError(proc(e: ref TpResultError) = 
+      echo fmt"[WARN] Error al obtener usuario: {e.msg}")
 
-  # 2️⃣ Logs de validación
-  discard validated
-    .tpTap(proc(validId: int) =
-      echo "✅ Validated user ID: ", validId
-    )
-    .tpTapError(proc(err: ref TpResultError) =
-      echo "⚠️ [Validation Error] ", err.msg
-    )
-
-  # 3️⃣ Si la validación falla, retorna directamente con fallback
-  if validated.tpIsFailure():
-    return "UNKNOWN_USER"
-
-  # 4️⃣ Consulta asincrónica a DB
-  let fetched = await validated.tpThenAsync(proc(validId: int): Future[TpResult[string]] =
-    fetchUserFromDb(validId)
-  )
-
-  # 5️⃣ Logs de fetch
-  discard fetched
-    .tpTap(proc(name: string) =
-      echo "✅ Fetched user: ", name
-    )
-    .tpTapError(proc(err: ref TpResultError) =
-      echo "⚠️ [DB Error] ", err.msg
-    )
-
-  # 6️⃣ Formatea o recupera si hay error
-  return fetched
+  # 3️⃣ Formateo final con fallback
+  return user
     .tpMap(formatUser)
-    .tpUnwrapOr("UNKNOWN_USER")
+    .tpUnwrapOr(DEFAULT_USER)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 🧪 Ejecución interactiva (pruebas básicas)
+# 🧪 Suite de pruebas mejorada
 # ─────────────────────────────────────────────────────────────────────────────
 
 when isMainModule:
-  echo waitFor getUserDisplay("12")   # ✅ válido
-  echo "---"
-  echo waitFor getUserDisplay("42")   # ❌ no encontrado
-  echo "---"
-  echo waitFor getUserDisplay("abc")  # ❌ inválido (parse error)
-  echo "---"
-  echo waitFor getUserDisplay("-1")   # ❌ ID negativo
+  suite "Pruebas de getUserDisplay":
+    test "ID válido":
+      check waitFor(getUserDisplay("12")) == "USER#12"
+    
+    test "Usuario no encontrado (ID 42)":
+      check waitFor(getUserDisplay("42")) == DEFAULT_USER
+    
+    test "ID inválido (no numérico)":
+      check waitFor(getUserDisplay("abc")) == DEFAULT_USER
+    
+    test "ID negativo":
+      check waitFor(getUserDisplay("-1")) == DEFAULT_USER
+    
+    test "ID cero":
+      check waitFor(getUserDisplay("0")) == DEFAULT_USER
+
+  echo "✅ Todas las pruebas pasaron"
