@@ -1,24 +1,29 @@
 ## tp_result.nim
 ##
-## Módulo: Monad de Resultados Tipados (TpResult)
-## Sistema: Talpo / Talpiko - Core Types
+## 📦 Módulo: Monad de Resultados Tipados (TpResult)
+## 🔧 Sistema: Talpo / Talpiko - Core Types
 ##
-## Responsabilidad:
-##   Proveer un tipo monádico seguro y eficiente para el manejo de éxito/fallo en operaciones empresariales y distribuidas.
+## 🎯 Responsabilidad:
+##   Proveer un tipo monádico seguro y eficiente para el manejo explícito
+##   de éxito o fallo en operaciones empresariales, distribuidas o críticas.
 ##
-## Características Clave:
+## 🚀 Características Clave:
 ## - Tipado fuerte y genérico
 ## - Representación explícita de éxito/fallo
-## - Integración con errores enriquecidos
-## - Optimización para hot path y bajo overhead
-## - Preparado para async, tracing y serialización
+## - Integración con errores enriquecidos (`TpResultError`)
+## - Sin dependencias del GC: se usa memoria manual con `box`
+## - Preparado para async, tracing, observabilidad y ARC/ORC
 ##
-## Buenas Prácticas:
-## - Usar siempre los constructores `tpOk` y `tpErr`
-## - No acceder directamente a los campos, usar helpers
-## - Documentar los códigos de error y casos de uso
+## 🧠 Memoria:
+## - Usa referencias `ref TpResultError` asignadas en heap de forma manual.
+## - Se debe usar `box` para instanciar errores (`tpErr`) en lugar de `new()`.
 ##
-## Ejemplo de uso:
+## 🧼 Buenas Prácticas:
+## - Usar siempre los constructores `tpOk`, `tpErr`
+## - No acceder directamente a los campos
+## - Evitar `new()`, usar `box()` o `newByCopy()`
+##
+## 🧪 Ejemplo de uso:
 ## ```nim
 ## let res: TpResult[int] = tpOk(42)
 ## if res.tpIsSuccess():
@@ -27,12 +32,12 @@
 ##   echo res.error.msg
 ## ```
 
-import ./tp_interfaces
-import ./tp_error
+import ./tp_interfaces       # Incluye TpResultKind y TpErrorSeverity
+import ./tp_error            # Incluye TpResultError y helpers de construcción
 import std/[times, json]
 
 when defined(release):
-  {.push checks: off.}  # Optimización producción
+  {.push checks: off.}
 else:
   {.push stackTrace: on.}
 
@@ -41,79 +46,72 @@ else:
 # ─────────────────────────────────────────────────────────────────────────────
 
 type
-  TpResultKind* = enum
-    ## Estado de un resultado
-    tpSuccess = "Success"
-    tpFailure = "Failure"
-
   TpResultMetadata* = object
-    ## Metadata adicional para diagnóstico
+    ## 🕓 Metadata adicional para diagnóstico y trazabilidad
     creationTime*: float64
 
   TpResult*[T] = object
-    ## Monad funcional que encapsula éxito o error
+    ## 🔄 Monad funcional que encapsula éxito o error
     case kind*: TpResultKind
-    of tpSuccess:
+    of tpSuccessKind:
       value*: T
-    of tpFailure:
+    of tpFailureKind:
       error*: ref TpResultError
       metadata*: TpResultMetadata
 
 # ─────────────────────────────────────────────────────────────────────────────
-# ⚙️ Configuración
+# ⚙️ Configuración: Códigos estándar de error
 # ─────────────────────────────────────────────────────────────────────────────
 
 const
-  tpDefaultErrorCode* = "TP_UNKNOWN"
-  tpInternalErrorCode* = "TP_INTERNAL"
+  tpDefaultErrorCode*    = "TP_UNKNOWN"
+  tpInternalErrorCode*   = "TP_INTERNAL"
   tpValidationErrorCode* = "TP_VALIDATION"
-  tpNetworkErrorCode* = "TP_NETWORK"
-  tpDatabaseErrorCode* = "TP_DATABASE"
+  tpNetworkErrorCode*    = "TP_NETWORK"
+  tpDatabaseErrorCode*   = "TP_DATABASE"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 🛠️ Implementación Principal
 # ─────────────────────────────────────────────────────────────────────────────
 
 proc tpIsSuccess*[T](res: TpResult[T]): bool {.inline.} =
-  ## Verifica si el resultado es exitoso
-  res.kind == tpSuccess
+  ## ✅ Verifica si el resultado representa éxito
+  res.kind == tpSuccessKind
 
 proc tpIsFailure*[T](res: TpResult[T]): bool {.inline.} =
-  ## Verifica si el resultado es un fallo
-  res.kind == tpFailure
+  ## ❌ Verifica si el resultado representa un fallo
+  res.kind == tpFailureKind
 
 proc tpUnwrap*[T](res: TpResult[T]): T =
-  ## Retorna el valor o lanza excepción con el mensaje del error
+  ## ⚠️ Retorna el valor en caso de éxito o lanza excepción si hay error
   if res.tpIsFailure():
-    raise newException(ValueError, res.error.msg)
+    if not res.error.originalException.isNil:
+      raise res.error.originalException
+    else:
+      raise newException(ValueError, res.error.msg)
   res.value
 
 proc tpGetOrDefault*[T](res: TpResult[T], fallback: T): T {.inline.} =
-  ## Retorna el valor en caso de éxito, o el valor por defecto si hay error
+  ## 🔁 Retorna el valor si es éxito, o `fallback` si es error
   if res.tpIsSuccess():
     res.value
   else:
     fallback
 
 proc tpUnsafeGet*[T](res: TpResult[T]): T {.inline.} =
-  ## Acceso directo al valor de éxito sin validación.
-  ##
-  ## ¡ADVERTENCIA!: Solo debe usarse si se garantiza que el resultado es tpSuccess.
-  ## Si se usa sobre un error, el comportamiento es indefinido y puede causar fallos.
-  ##
-  ## Ejemplo:
-  ## ```nim
-  ## let val = res.tpUnsafeGet() # Solo si res.tpIsSuccess()
-  ## ```
+  ## 🧨 Acceso directo sin validación (solo si garantizas que es éxito)
   {.push checks: off.}
   result = res.value
   {.pop.}
 
 proc toJson*[T](res: TpResult[T]): JsonNode =
-  ## Serializa el resultado a JSON para logging/tracing
+  ## 📤 Serializa el resultado a JSON para logging, trazabilidad, observabilidad
   case res.kind
   of tpSuccess:
-    result = %*{"kind": "Success", "value": res.value}
+    result = %*{
+      "kind": "Success",
+      "value": res.value
+    }
   of tpFailure:
     result = %*{
       "kind": "Failure",
@@ -124,6 +122,7 @@ proc toJson*[T](res: TpResult[T]): JsonNode =
 # ─────────────────────────────────────────────────────────────────────────────
 # 🏎️ Notas de rendimiento
 # ─────────────────────────────────────────────────────────────────────────────
-## - Todas las operaciones son O(1) salvo serialización (O(n) en error/context)
-## - El objeto es inmutable tras creación
-## - Preparado para integración con memory pools y ARC/ORC
+## - Todas las operaciones son O(1) (excepto serialización)
+## - El objeto es inmutable tras construcción
+## - Listo para integrarse con memory pools, ARC, ORC o entornos embebidos
+## - Compatible con sistemas async y modelos de tracing modernos

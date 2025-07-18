@@ -10,18 +10,18 @@ type TestObj = ref object
 suite "TpResult Type Tests":
   test "Monad chaining":
     let res = tpOk(42) >>= proc(x: int): TpResult[string] = tpOk($x)
-    check res.kind == tpSuccess
+    check res.kind == tpSuccessKind
     check res.value == "42"
 
   test "Error propagation":
     let res = tpErr[int]("Error", "TP_TEST_CODE") >>= proc(x: int): TpResult[string] = tpOk($x)
-    check res.kind == tpFailure
+    check res.kind == tpFailureKind
     check res.error.msg == "Error"
     check res.error.code == "TP_TEST_CODE"
 
   test "Map operator":
     let res = tpMap(tpOk(42), proc(x: int): string = $x)
-    check res.kind == tpSuccess
+    check res.kind == tpSuccessKind
     check res.value == "42"
 
   test "TryOr macro":
@@ -30,7 +30,7 @@ suite "TpResult Type Tests":
       discard 42
       0
     let res = tpTryCatch[int](alwaysFails)
-    check res.kind == tpFailure
+    check res.kind == tpFailureKind
     check res.error.msg == "Test error"
     # No hay code personalizado, así que solo se verifica el mensaje
 
@@ -38,13 +38,13 @@ suite "TpResult Type Tests":
     proc alwaysSucceeds(): int =
       42
     let res = tpTryCatch[int](alwaysSucceeds)
-    check res.kind == tpSuccess
+    check res.kind == tpSuccessKind
     check res.value == 42
 
   test "Error with exception":
     let exc = newException(ValueError, "Test error")
     let res = tpErr[int](exc.msg, "TP_EXC_CODE", original=exc)
-    check res.kind == tpFailure
+    check res.kind == tpFailureKind
     check res.error.msg == "Test error"
     check res.error.code == "TP_EXC_CODE"
 
@@ -54,7 +54,7 @@ suite "TpResult Type Tests":
       discard TestObj(nil)
       TestObj(nil)
     let resNull = tpTryCatch[TestObj](nullFails)
-    check resNull.kind == tpFailure
+    check resNull.kind == tpFailureKind
     check resNull.error.msg == "Null error"
     # No hay code personalizado, así que solo se verifica el mensaje
 
@@ -81,14 +81,14 @@ suite "TpResult Type Tests":
 
   test "OrElse method":
     let resErr = tpErr[int]("Error", "TP_TEST_CODE")
-    let res = if resErr.kind == tpSuccess: resErr else: tpOk(100)
-    check res.kind == tpSuccess
+    let res = if resErr.kind == tpSuccessKind: resErr else: tpOk(100)
+    check res.kind == tpSuccessKind
     check res.value == 100
 
   test "Nil value for ref types":
     let resOk = tpOk[TestObj](nil)
     let resErr = tpErr[TestObj]("Error", "TP_TEST_CODE")
-    check resOk.kind == tpSuccess
+    check resOk.kind == tpSuccessKind
     check resOk.value.isNil
-    check resErr.kind == tpFailure
+    check resErr.kind == tpFailureKind
     check not resErr.error.isNil

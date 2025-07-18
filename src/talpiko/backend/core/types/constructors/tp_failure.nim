@@ -74,7 +74,7 @@ proc tpErr*[T](
     )
 
   TpResult[T](
-    kind: tpFailure,
+    kind: tpFailureKind,
     error: errorObj,
     metadata: TpResultMetadata(creationTime: epochTime())
   )

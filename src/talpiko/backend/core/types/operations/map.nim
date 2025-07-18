@@ -44,9 +44,9 @@ proc tpMap*[T, R](
   ## let r2 = r.tpMap(proc(x: int): string = $x)
   ## ```
   if res.tpIsSuccess():
-    TpResult[R](kind: tpSuccess, value: f(res.tpUnsafeGet()))
+    TpResult[R](kind: tpSuccessKind, value: f(res.tpUnsafeGet()))
   else:
-    TpResult[R](kind: tpFailure, error: res.error)
+    TpResult[R](kind: tpFailureKind, error: res.error)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 🚨 tpMapError: Mapea el error si es fallo
@@ -69,6 +69,6 @@ proc tpMapError*[T](
   ## let r2 = r.tpMapError(proc(e) = newTpResultError("envuelto: " & e.msg))
   ## ```
   if res.tpIsFailure():
-    TpResult[T](kind: tpFailure, error: f(res.error))
+    TpResult[T](kind: tpFailureKind, error: f(res.error))
   else:
     res

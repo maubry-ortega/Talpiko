@@ -28,8 +28,8 @@ type
     ##
     ## - `tpSuccess`: La operación terminó exitosamente.
     ## - `tpFailure`: Ocurrió un error durante la operación.
-    tpSuccess = "Success"
-    tpFailure = "Failure"
+    tpSuccessKind = "Success"
+    tpFailureKind = "Failure"
 
   TpErrorSeverity* = enum
     ## 🚨 Clasificación de severidad de errores

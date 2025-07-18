@@ -38,7 +38,7 @@ proc `>>=`*[T, R](
       return op(res.tpUnsafeGet())
     except CatchableError as e:
       return TpResult[R](
-        kind: tpFailure,
+        kind: tpFailureKind,
         error: newTpResultErrorRef(
           msg = e.msg,
           code = "TP_MONAD_BIND_EXCEPTION",
@@ -49,7 +49,7 @@ proc `>>=`*[T, R](
       )
   else:
     return TpResult[R](
-      kind: tpFailure,
+      kind: tpFailureKind,
       error: res.error
     )
 
