@@ -1,27 +1,41 @@
 ## 📄 tp_boxing.nim
 ##
 ## 📌 Boxing seguro de objetos inicializados manualmente
-##
-## 🎯 Crea `ref T` mutables inicializables dentro del bloque (`it`):
-## - Reemplaza `new()` + inicialización separada
-## - Usar como: `box[MyType]: it.field = "valor"`
+## 🛡️ Versión mejorada con verificaciones de seguridad
 
 import ./tp_memoryutils
 
 template box*[T](body: untyped): ref T =
-  ## 📦 Crea un objeto `ref T` inicializado manualmente con campos mutables
+  ## 📦 Crea un objeto `ref T` inicializado manualmente
   ##
-  ## Acceso como `it`: el objeto mutable sobre el cual puedes asignar campos.
-  ##
-  ## Ejemplo:
+  ## Ejemplo seguro:
   ## ```nim
   ## let user = box[User]:
   ##   it.name = "Alice"
   ##   it.age = 30
   ## ```
+  {.line.}:
+    when sizeof(T) == 0:
+      {.error: "No se puede boxear tipo de tamaño cero".}
+    
+    let p = newByZeroedRef[T]()
+    try:
+      block:
+        var it {.inject.} = p[]
+        body
+        p[] = it
+      p
+    except:
+      deallocRef(p)
+      raise
+
+proc boxWith*[T](initProc: proc(x: var T)): ref T =
+  ## 🆕 Versión alternativa con procedimiento de inicialización
+  ## Más seguro para inicializaciones complejas
   let p = newByZeroedRef[T]()
-  block:
-    var it {.inject.} = p[]
-    body
-    p[] = it
-  p
+  try:
+    initProc(p[])
+    p
+  except:
+    deallocRef(p)
+    raise

@@ -5,7 +5,7 @@ import std/asyncdispatch
 import std/strutils
 import std/strformat
 import std/unittest
-import ./types
+import ../../../src/talpiko/backend/core/types
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 🛠️ Constantes y tipos auxiliares
