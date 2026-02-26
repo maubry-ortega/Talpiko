@@ -6,8 +6,8 @@ import strutils  # Necesario para toLower
 type
   TpPattern* = ref object
     ## Patrón compilado para búsqueda
-    pattern: string
-    caseSensitive: bool
+    pattern*: string
+    caseSensitive*: bool
 
 proc tpCompilePattern*(pattern: string, caseSensitive = false): TpPattern =
   ## Compila un patrón simple
@@ -23,7 +23,28 @@ proc tpMatch*(input: string, pattern: TpPattern): bool =
   var i = 0
   var p = 0
 
-  while i < str.len and p < pat.len:
+  while i <= str.len and p < pat.len:
+    if pat[p] == '*':
+      # 0 o más caracteres
+      if p == pat.len - 1:
+        return true # Coincide con cualquier cosa al final
+      inc(p)
+      
+      # Try matching the remaining pattern against every possible suffix of str starting from i
+      var matchFound = false
+      var j = i
+      while j <= str.len:
+        let strSuffix = if j < str.len: str.substr(j) else: ""
+        if tpMatch(strSuffix, tpCompilePattern(pat.substr(p))):
+          matchFound = true
+          break
+        inc(j)
+      return matchFound
+    
+    # Si la cadena se acabó pero el patrón no es un '*', no coincide
+    if i == str.len:
+      break
+
     case pat[p]
     of '[':
       # Grupo de caracteres [abc]
@@ -41,17 +62,6 @@ proc tpMatch*(input: string, pattern: TpPattern): bool =
       # Opcional (0 o 1)
       inc(i)
       inc(p)
-    of '*':
-      # 0 o más caracteres
-      if p == pat.len - 1:
-        return true # Coincide con cualquier cosa al final
-      inc(p)
-      let nextPat = pat[p]
-      while i < str.len:
-        if tpMatch(str.substr(i), tpCompilePattern(pat.substr(p))):
-          return true
-        inc(i)
-      return false
     of '.':
       # Cualquier carácter
       inc(i)

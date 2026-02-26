@@ -5,47 +5,50 @@
 import macros
 
 type
+  TpErrorCode* = enum
+    ## Códigos de error estructurados para Talpiko
+    tpecOk,
+    tpecUnknown,
+    tpecError,
+    tpecNotFound,
+    tpecValidationError,
+    tpecSerializationError,
+    tpecDeserializationError,
+    tpecParseError,
+    tpecUnauthorized,
+    tpecForbidden,
+    tpecInternalError
+
+
+  TpError* = object
+    ## Estructura de error tipada
+    code*: TpErrorCode
+    msg*: string
+
   TpResult*[T] = object
     ## Monad Result para manejo funcional de errores.
-    isOk*: bool
-    value*: T
-    error*: ref Exception
-    errorMsg*: string
-    errorCode*: string
+    case isOk*: bool
+    of true:
+      value*: T
+    of false:
+      error*: TpError
   
   TpResultError* = object of CatchableError
     ## Excepción base para resultados, hereda de CatchableError.
-    code*: string
+    code*: TpErrorCode
 
 proc tpOk*[T](value: T): TpResult[T] =
   ## Crea un resultado exitoso con un valor.
-  ## Args:
-  ##   value: Valor a encapsular en el TpResult.
-  TpResult[T](isOk: true, value: value, errorMsg: "", errorCode: "")
+  TpResult[T](isOk: true, value: value)
 
-proc tpErr*[T](error: string, code: string = "TP_UNKNOWN"): TpResult[T] =
-  ## Crea un resultado de error con un mensaje.
-  ## Args:
-  ##   error: Mensaje de error.
-  ##   code: Código de error opcional.
-  TpResult[T](
-    isOk: false,
-    error: newException(TpResultError, error),
-    errorMsg: error,
-    errorCode: code
-  )
+proc tpErr*[T](msg: string, code: TpErrorCode = tpecUnknown): TpResult[T] =
+  ## Crea un resultado de error con un mensaje y código.
+  TpResult[T](isOk: false, error: TpError(code: code, msg: msg))
 
-proc tpErr*[T](error: ref Exception, code: string = "TP_UNKNOWN"): TpResult[T] =
+proc tpErr*[T](e: ref Exception, code: TpErrorCode = tpecUnknown): TpResult[T] =
+
   ## Crea un resultado de error con una excepción.
-  ## Args:
-  ##   error: Excepción a encapsular.
-  ##   code: Código de error opcional.
-  TpResult[T](
-    isOk: false,
-    error: error,
-    errorMsg: error.msg,
-    errorCode: code
-  )
+  TpResult[T](isOk: false, error: TpError(code: code, msg: e.msg))
 
 proc tpIsError*[T](res: TpResult[T]): bool {.inline.} =
   ## Retorna true si el TpResult es un error.
@@ -53,22 +56,22 @@ proc tpIsError*[T](res: TpResult[T]): bool {.inline.} =
 
 proc tpIsOkOrError*[T](res: TpResult[T]): bool {.inline.} =
   ## Retorna true si el TpResult está en estado ok o error.
-  res.isOk or res.tpIsError
+  true # TpResult siempre es uno de los dos
 
 proc `>>=`*[T, R](res: TpResult[T], op: proc(x: T): TpResult[R]): TpResult[R] {.inline.} =
   ## Operador bind para encadenar operaciones en el monad TpResult.
   if res.isOk: op(res.value)
-  else: tpErr[R](res.errorMsg, res.errorCode)
+  else: tpErr[R](res.error.msg, res.error.code)
 
 proc tpMap*[T, R](res: TpResult[T], op: proc(x: T): R): TpResult[R] {.inline.} =
   ## Transforma el valor de un TpResult usando una función.
   if res.isOk: tpOk(op(res.value))
-  else: tpErr[R](res.errorMsg, res.errorCode)
+  else: tpErr[R](res.error.msg, res.error.code)
 
 proc tpUnwrap*[T](res: TpResult[T]): T {.inline.} =
   ## Extrae el valor de un TpResult, lanza excepción si es error.
   if res.isOk: res.value
-  else: raise newException(TpResultError, res.errorMsg)
+  else: raise (ref TpResultError)(msg: res.error.msg, code: res.error.code)
 
 proc tpGetOrDefault*[T](res: TpResult[T], default: T): T {.inline.} =
   ## Retorna el valor de un TpResult o un valor por defecto si es error.
@@ -92,3 +95,73 @@ template tpTryOr*[T](body: untyped, errorHandler: untyped): TpResult[T] =
     except CatchableError as e:
       result = errorHandler(e)
   result
+  
+# --- Talpiko Web Types ---
+
+import json, tables, asyncdispatch, asynchttpserver, httpcore
+import ./logging
+
+type
+  TpHttpMethod* = enum
+    ## Métodos HTTP soportados
+    HttpGet = "GET"
+    HttpPost = "POST"
+    HttpPut = "PUT"
+    HttpDelete = "DELETE"
+    HttpPatch = "PATCH"
+    HttpOptions = "OPTIONS"
+    HttpHead = "HEAD"
+
+  TpRequest* = ref object
+    ## Representa una petición HTTP entrante
+    req*: Request           # Petición original de asynchttpserver
+    reqMethod*: TpHttpMethod   # Método HTTP parseado
+    path*: string           # Ruta de la URL solicitada
+    query*: Table[string, string] # Parámetros de la URL (?key=value)
+    params*: Table[string, string] # Parámetros de la ruta (/users/{id})
+    body*: string           # Cuerpo de la petición puro
+    jsonBody*: JsonNode     # Cuerpo parseado como JSON si content-type es aplication/json
+
+  TpResponse* = ref object
+    ## Representa una respuesta HTTP saliente
+    code*: HttpCode         # Código de estado HTTP (ej: Http200)
+    headers*: HttpHeaders   # Cabeceras de la respuesta
+    body*: string           # Cuerpo de la respuesta
+
+  TpContext* = ref object
+    ## Contexto actual de ejecución para un Handler
+    req*: TpRequest
+    res*: TpResponse
+    logger*: TpLogger
+
+  TpHandler* = proc(ctx: TpContext): Future[void] {.gcsafe.}
+    ## Firma estándar de un controlador / manejador de ruta en Talpiko
+
+  TpErrorResponse* = object
+    ## Modelo estándar para respuestas de error de la API
+    code*: string
+    message*: string
+    status*: string = "error"
+
+proc newTpResponse*(code: HttpCode = Http200, body: string = "", contentType: string = "text/plain"): TpResponse =
+  ## Crea una nueva respuesta base.
+  result = new TpResponse
+  result.code = code
+  result.body = body
+  result.headers = newHttpHeaders([("Content-Type", contentType)])
+
+proc json*(res: TpResponse, data: JsonNode, code: HttpCode = Http200) =
+  ## Modifica la respuesta para devolver JSON
+  res.code = code
+  res.body = $data
+  res.headers["Content-Type"] = "application/json"
+
+proc html*(res: TpResponse, htmlStr: string, code: HttpCode = Http200) =
+  ## Modifica la respuesta para devolver HTML
+  res.code = code
+  res.body = htmlStr
+  res.headers["Content-Type"] = "text/html"
+
+proc status*(res: TpResponse, code: HttpCode) =
+  ## Solo ajusta el código de status
+  res.code = code
