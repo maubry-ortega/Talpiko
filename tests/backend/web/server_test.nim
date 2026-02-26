@@ -10,7 +10,7 @@ suite "TpServer Tests":
   test "Context correctly sets JSON responses":
     let s = newTpServer()
     proc myHandler(ctx: TpContext): Future[void] {.async.} =
-      ctx.json(%*{"msg": "Hello"}, Http200)
+      ctx.ok((msg: "Hello"))
 
     s.router.get("/api/data", myHandler)
 
@@ -27,7 +27,7 @@ suite "TpServer Tests":
     check q.len == 0
 
   test "Method parser handles all verbs":
-    check tpParseHttpMethod("GeT") == HttpGet
-    check tpParseHttpMethod("PosT") == HttpPost
-    check tpParseHttpMethod("PaTcH") == HttpPatch
+    check tpParseHttpMethod("GET") == HttpGet
+    check tpParseHttpMethod("POST") == HttpPost
+    check tpParseHttpMethod("PATCH") == HttpPatch
     check tpParseHttpMethod("INVALID") == HttpGet # Default

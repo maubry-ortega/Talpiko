@@ -107,28 +107,46 @@ proc tpValidatePhone*(phone: string): TpResult[string] =
 # Utilidades Web
 # ----------------------------
 proc tpParseQuery*(url: string): Table[string, string] =
-  ## Extrae query params de una url (/ruta?a=1&b=2)
-  var query = initTable[string, string]()
-  let parts = url.split("?")
-  if parts.len > 1:
-    let qParams = parts[1].split("&")
-    for q in qParams:
-      let kv = q.split("=")
-      if kv.len == 2:
-        query[kv[0]] = kv[1]
-  return query
+  ## Extrae query params de una url (/ruta?a=1&b=2).
+  ## Escaneo lineal con aritmética de índices sobre `url` — sin split intermedio.
+  result = initTable[string, string]()
+  var qi = url.find('?')
+  if qi < 0: return
+  inc qi  # skip '?'
+  let n = url.len
+  var i = qi
+  while i < n:
+    # Find '=' separator
+    var j = i
+    while j < n and url[j] != '=' and url[j] != '&': inc j
+    if j >= n or url[j] != '=': break
+    let key = url[i ..< j]
+    inc j  # skip '='
+    # Find '&' or end
+    var k = j
+    while k < n and url[k] != '&': inc k
+    let val = url[j ..< k]
+    if key.len > 0:
+      result[key] = val
+    i = k + 1  # skip '&'
 
 proc tpParseHttpMethod*(s: string): TpHttpMethod =
-  ## Convierte de string HTTPMethod nativo a enum TpHttpMethod
-  case s.toUpperAscii()
-  of "GET": return HttpGet
-  of "POST": return HttpPost
-  of "PUT": return HttpPut
-  of "DELETE": return HttpDelete
-  of "PATCH": return HttpPatch
-  of "OPTIONS": return HttpOptions
-  of "HEAD": return HttpHead
-  else: return HttpGet
+  ## Convierte string HTTPMethod a enum TpHttpMethod.
+  ## Usa comparación directa de bytes — sin toUpperAscii, sin alloc.
+  if s.len == 3:
+    if s[0] == 'G': return HttpGet   # GET
+    if s[0] == 'P': return HttpPut   # PUT
+  elif s.len == 4:
+    if s[0] == 'P': return HttpPost  # POST  (len=4 vs PUT len=3)
+    if s[0] == 'H': return HttpHead  # HEAD
+  elif s.len == 5:
+    if s[0] == 'P': return HttpPatch # PATCH
+  elif s.len == 6:
+    if s[0] == 'D': return HttpDelete  # DELETE
+    if s[0] == 'O': return HttpOptions # OPTIONS... fallthrough to len==7
+  elif s.len == 7:
+    if s[0] == 'O': return HttpOptions
+  return HttpGet  # fallback
 
 # ----------------------------
 # Serialización Estática (Phase 4)

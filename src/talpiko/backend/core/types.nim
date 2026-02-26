@@ -6,8 +6,9 @@ import macros
 
 type
   TpErrorCode* = enum
-    ## Códigos de error estructurados para Talpiko
-    tpecOk,
+    ## Códigos de error estructurados para Talpiko.
+    ## El orden del enum define el índice para los const arrays de abajo.
+    tpecOk = 0,
     tpecUnknown,
     tpecError,
     tpecNotFound,
@@ -32,7 +33,7 @@ type
       value*: T
     of false:
       error*: TpError
-  
+
   TpResultError* = object of CatchableError
     ## Excepción base para resultados, hereda de CatchableError.
     code*: TpErrorCode
@@ -95,7 +96,41 @@ template tpTryOr*[T](body: untyped, errorHandler: untyped): TpResult[T] =
     except CatchableError as e:
       result = errorHandler(e)
   result
-  
+
+# --- Compile-Time Error Mappings ---
+# These arrays are indexed by TpErrorCode and evaluated purely at compile time.
+# Zero runtime cost: no $errorCode, no match expressions on the hot path.
+
+import httpcore as httpcore_mod
+
+const tpErrorHttpCode*: array[TpErrorCode, HttpCode] = [
+  tpecOk: Http200,
+  tpecUnknown: Http500,
+  tpecError: Http500,
+  tpecNotFound: Http404,
+  tpecValidationError: Http422,
+  tpecSerializationError: Http500,
+  tpecDeserializationError: Http400,
+  tpecParseError: Http400,
+  tpecUnauthorized: Http401,
+  tpecForbidden: Http403,
+  tpecInternalError: Http500,
+]
+
+const tpErrorCodeStr*: array[TpErrorCode, string] = [
+  tpecOk: "OK",
+  tpecUnknown: "UNKNOWN_ERROR",
+  tpecError: "ERROR",
+  tpecNotFound: "NOT_FOUND",
+  tpecValidationError: "VALIDATION_ERROR",
+  tpecSerializationError: "SERIALIZATION_ERROR",
+  tpecDeserializationError: "DESERIALIZATION_ERROR",
+  tpecParseError: "PARSE_ERROR",
+  tpecUnauthorized: "UNAUTHORIZED",
+  tpecForbidden: "FORBIDDEN",
+  tpecInternalError: "INTERNAL_ERROR",
+]
+
 # --- Talpiko Web Types ---
 
 import json, tables, asyncdispatch, asynchttpserver, httpcore
@@ -114,19 +149,19 @@ type
 
   TpRequest* = ref object
     ## Representa una petición HTTP entrante
-    req*: Request           # Petición original de asynchttpserver
-    reqMethod*: TpHttpMethod   # Método HTTP parseado
-    path*: string           # Ruta de la URL solicitada
-    query*: Table[string, string] # Parámetros de la URL (?key=value)
+    req*: Request                  # Petición original de asynchttpserver
+    reqMethod*: TpHttpMethod       # Método HTTP parseado
+    path*: string                  # Ruta de la URL solicitada
+    query*: Table[string, string]  # Parámetros de la URL (?key=value)
     params*: Table[string, string] # Parámetros de la ruta (/users/{id})
-    body*: string           # Cuerpo de la petición puro
-    jsonBody*: JsonNode     # Cuerpo parseado como JSON si content-type es aplication/json
+    body*: string                  # Cuerpo de la petición puro
+    jsonBody*: JsonNode # Cuerpo parseado como JSON si content-type es aplication/json
 
   TpResponse* = ref object
     ## Representa una respuesta HTTP saliente
-    code*: HttpCode         # Código de estado HTTP (ej: Http200)
-    headers*: HttpHeaders   # Cabeceras de la respuesta
-    body*: string           # Cuerpo de la respuesta
+    code*: HttpCode       # Código de estado HTTP (ej: Http200)
+    headers*: HttpHeaders # Cabeceras de la respuesta
+    body*: string         # Cuerpo de la respuesta
 
   TpContext* = ref object
     ## Contexto actual de ejecución para un Handler
@@ -134,7 +169,7 @@ type
     res*: TpResponse
     logger*: TpLogger
 
-  TpHandler* = proc(ctx: TpContext): Future[void] {.gcsafe.}
+  TpHandler* = proc(ctx: TpContext): Future[void] {.closure, gcsafe.}
     ## Firma estándar de un controlador / manejador de ruta en Talpiko
 
   TpErrorResponse* = object
@@ -143,7 +178,8 @@ type
     message*: string
     status*: string = "error"
 
-proc newTpResponse*(code: HttpCode = Http200, body: string = "", contentType: string = "text/plain"): TpResponse =
+proc newTpResponse*(code: HttpCode = Http200, body: string = "",
+    contentType: string = "text/plain"): TpResponse =
   ## Crea una nueva respuesta base.
   result = new TpResponse
   result.code = code

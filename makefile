@@ -16,8 +16,14 @@ test-integration:
 
 test-all: test-unit test-integration
 
+bench:
+	nim c -r --opt:speed tests/benchmarks/bench_router.nim
+	nim c -r --opt:speed tests/benchmarks/bench_serialize.nim
+	nim c -r --opt:speed tests/benchmarks/bench_request.nim
+
 clean:
 	rm -f tests/backend/core/*.o
 	rm -f tests/backend/core/di/*.o
 	rm -f tests/backend/integration/*.o
+	rm -f tests/benchmarks/*.o
 	rm -f test.log
