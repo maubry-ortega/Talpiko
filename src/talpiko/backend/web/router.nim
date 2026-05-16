@@ -1,5 +1,5 @@
 # src/talpiko/backend/web/router.nim
-## Enrutador compile-time de Talpiko con soporte RPC y Auto-Serialization.
+## Enrutador compile-time de Talpiko con soporte RPC, Auto-Serialization y Middlewares.
 import macros, asyncdispatch, tables, strutils
 import ../core/types
 import ./rpc
@@ -18,7 +18,16 @@ type
     handler:  TpHandler
 
   TpRouter* = ref object
-    entries:  seq[TpRouteEntry]
+    entries:     seq[TpRouteEntry]
+    middlewares*: seq[TpMiddleware]
+
+var gGlobalMiddlewares {.compileTime.}: seq[NimNode]
+
+macro use*(router: TpRouter, mw: typed) =
+  ## Registra un middleware global que se inyectará en todas las rutas.
+  gGlobalMiddlewares.add(mw)
+  result = quote do:
+    `router`.middlewares.add(`mw`)
 
 proc parseSegments(path: string): seq[TpRouteSegment] =
   var i = 0
@@ -39,6 +48,7 @@ proc parseSegments(path: string): seq[TpRouteSegment] =
 proc newTpRouter*(): TpRouter =
   new(result)
   result.entries = newSeqOfCap[TpRouteEntry](32)
+  result.middlewares = @[]
 
 proc addRoute*(router: TpRouter, methodType: TpHttpMethod, path: string, handler: TpHandler) =
   router.entries.add TpRouteEntry(
@@ -76,15 +86,14 @@ proc matchRoute*(router: TpRouter, methodType: TpHttpMethod, path: string): TpMa
       if pi == pn and si == entry.segments.len:
         result.matched = true; result.handler = entry.handler; result.params = pTable; return
 
-macro tpRoute*(router: TpRouter, methodType: TpHttpMethod, path: static string, handler: typed) =
+macro tpRoute*(router: TpRouter, methodType: TpHttpMethod, path: static string, handler: typed, localMws: varargs[untyped]) =
   let handlerName = handler
-  let params = handler.getTypeImpl[0]
+  let params = (handler.getTypeImpl)[0]
   
-  # 1. Metadata Extraction
+  # 1. Metadata Extraction (RPC)
   var hType = handler.getTypeImpl
   var retTypeStr = "void"
   var discoveryCalls = newStmtList()
-  
   if hType.len > 0 and hType[0].kind == nnkFormalParams:
     let formalParams = hType[0]
     if formalParams.len > 0:
@@ -98,47 +107,53 @@ macro tpRoute*(router: TpRouter, methodType: TpHttpMethod, path: static string, 
   for i in 2 ..< params.len:
     let pNode = params[i]
     let pName = pNode[0].strVal
-    let pType = pNode[1]
+    let pTypeStr = pNode[1].repr
     let pKind = if path.contains("{" & pName & "}") or path.contains(":" & pName): "path" else: "query"
-    rpcParams.add(quote do: RpcParam(name: `pName`, typ: `pType`.repr, kind: `pKind`))
-    discoveryCalls.add(newCall(ident("tpDiscoverType"), pType))
+    rpcParams.add(quote do: RpcParam(name: `pName`, typ: `pTypeStr`, kind: `pKind`))
+    discoveryCalls.add(newCall(ident("tpDiscoverType"), pNode[1]))
 
   # 2. Wrapper Generation
-  var wrapper: NimNode
-  let isSimple = params.len <= 2
+  let ctxNode = genSym(nskParam, "ctx")
+  var wrapperBody = newStmtList()
   
-  if isSimple and retTypeStr == "void":
-    wrapper = handlerName
-  else:
-    let ctxNode = genSym(nskParam, "ctx")
-    var wrapperBody = newStmtList()
-    var callArgs = newSeq[NimNode]()
-    callArgs.add(ctxNode)
-    if not isSimple:
-      for i in 2 ..< params.len:
-        let pn = params[i][0].strVal
-        let pt = params[i][1]
-        let ps = genSym(nskLet, pn)
-        let getCall = newCall(newDotExpr(ctxNode, ident("getParam")), newLit(pn))
-        var conv: NimNode
-        case pt.repr
-        of "int": conv = newCall(ident("parseInt"), getCall)
-        of "float": conv = newCall(ident("parseFloat"), getCall)
-        of "bool": conv = newCall(ident("parseBool"), getCall)
-        else: conv = getCall
-        wrapperBody.add(newTree(nnkLetSection, newTree(nnkIdentDefs, ps, newEmptyNode(), conv)))
-        callArgs.add(ps)
-    
-    let callExpr = newCall(handlerName, callArgs)
-    if retTypeStr != "void":
-      wrapperBody.add(quote do:
-        let val = await `callExpr`
-        `ctxNode`.ok(val))
-    else:
-      wrapperBody.add(quote do: await `callExpr`)
+  # ── Pipeline de Middlewares (Phase 11) ──
+  for mw in gGlobalMiddlewares:
+    wrapperBody.add(quote do:
+      if not await `mw`(`ctxNode`): return
+    )
+  for i in 0 ..< localMws.len:
+    let mw = localMws[i]
+    wrapperBody.add(quote do:
+      if not await `mw`(`ctxNode`): return
+    )
 
-    wrapper = quote do:
-      proc(`ctxNode`: TpContext): Future[void] {.async, gcsafe, closure.} = `wrapperBody`
+  # ── Parameter Extraction ──
+  var callArgs = newSeq[NimNode]()
+  callArgs.add(ctxNode)
+  for i in 2 ..< params.len:
+    let pn = params[i][0].strVal
+    let pt = params[i][1]
+    let ps = genSym(nskLet, pn)
+    let getCall = newCall(newDotExpr(ctxNode, ident("getParam")), newLit(pn))
+    var conv: NimNode
+    case pt.repr
+    of "int": conv = newCall(ident("parseInt"), getCall)
+    of "float": conv = newCall(ident("parseFloat"), getCall)
+    of "bool": conv = newCall(ident("parseBool"), getCall)
+    else: conv = getCall
+    wrapperBody.add(newTree(nnkLetSection, newTree(nnkIdentDefs, ps, newEmptyNode(), conv)))
+    callArgs.add(ps)
+    
+  let callExpr = newCall(handlerName, callArgs)
+  if retTypeStr != "void":
+    wrapperBody.add(quote do:
+      let val = await `callExpr`
+      `ctxNode`.ok(val))
+  else:
+    wrapperBody.add(quote do: await `callExpr`)
+
+  let wrapper = quote do:
+    proc(`ctxNode`: TpContext): Future[void] {.async, gcsafe, closure.} = `wrapperBody`
 
   # 3. Final Codegen
   let hNameLit = newLit(handler.strVal)
@@ -151,9 +166,15 @@ macro tpRoute*(router: TpRouter, methodType: TpHttpMethod, path: static string, 
       registerRpcMetadata(RpcEndpoint(name: `hNameLit`, path: `path`, methd: `mStrLit`, params: `rpcPS`, returnTyp: `retTypeStr`))
     `router`.addRoute(`methodType`, `path`, `wrapper`)
 
-template get*(router: TpRouter, path: static string, handler: untyped) = tpRoute(router, HttpGet, path, handler)
-template post*(router: TpRouter, path: static string, handler: untyped) = tpRoute(router, HttpPost, path, handler)
-template put*(router: TpRouter, path: static string, handler: untyped) = tpRoute(router, HttpPut, path, handler)
-template delete*(router: TpRouter, path: static string, handler: untyped) = tpRoute(router, HttpDelete, path, handler)
-template patch*(router: TpRouter, path: static string, handler: untyped) = tpRoute(router, HttpPatch, path, handler)
-template options*(router: TpRouter, path: static string, handler: untyped) = tpRoute(router, HttpOptions, path, handler)
+template get*(router: TpRouter, path: static string, handler: untyped, mws: varargs[untyped]) = 
+  tpRoute(router, HttpGet, path, handler, mws)
+template post*(router: TpRouter, path: static string, handler: untyped, mws: varargs[untyped]) = 
+  tpRoute(router, HttpPost, path, handler, mws)
+template put*(router: TpRouter, path: static string, handler: untyped, mws: varargs[untyped]) = 
+  tpRoute(router, HttpPut, path, handler, mws)
+template delete*(router: TpRouter, path: static string, handler: untyped, mws: varargs[untyped]) = 
+  tpRoute(router, HttpDelete, path, handler, mws)
+template patch*(router: TpRouter, path: static string, handler: untyped, mws: varargs[untyped]) = 
+  tpRoute(router, HttpPatch, path, handler, mws)
+template options*(router: TpRouter, path: static string, handler: untyped, mws: varargs[untyped]) = 
+  tpRoute(router, HttpOptions, path, handler, mws)

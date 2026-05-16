@@ -133,44 +133,61 @@ const tpErrorCodeStr*: array[TpErrorCode, string] = [
 
 # --- Talpiko Web Types ---
 
-import json, tables, asyncdispatch, asynchttpserver, httpcore
-import ./logging
+when defined(js) or defined(wasm):
+  when defined(js):
+    import std/[asyncjs, json]
+    export asyncjs.Future
+  else:
+    import std/json
+    type Future*[T] = ref object
+  type
+    TpContext* = ref object # Placeholder para el cliente
+else:
+  import json, tables, asyncdispatch, asynchttpserver, httpcore
+  import ./logging
+  type
+    TpHttpMethod* = enum
+      HttpGet = "GET"
+      HttpPost = "POST"
+      HttpPut = "PUT"
+      HttpDelete = "DELETE"
+      HttpPatch = "PATCH"
+      HttpOptions = "OPTIONS"
+      HttpHead = "HEAD"
+
+    TpRequest* = ref object
+      req*: Request
+      reqMethod*: TpHttpMethod
+      path*: string
+      query*: Table[string, string]
+      params*: Table[string, string]
+      body*: string
+      jsonBody*: JsonNode
+
+    TpResponse* = ref object
+      code*: HttpCode
+      headers*: HttpHeaders
+      body*: string
+
+    TpContext* = ref object
+      req*: TpRequest
+      res*: TpResponse
+      logger*: TpLogger
 
 type
-  TpHttpMethod* = enum
-    ## Métodos HTTP soportados
-    HttpGet = "GET"
-    HttpPost = "POST"
-    HttpPut = "PUT"
-    HttpDelete = "DELETE"
-    HttpPatch = "PATCH"
-    HttpOptions = "OPTIONS"
-    HttpHead = "HEAD"
+  User* = object
+    id*: int
+    fullName*: string
 
-  TpRequest* = ref object
-    ## Representa una petición HTTP entrante
-    req*: Request                  # Petición original de asynchttpserver
-    reqMethod*: TpHttpMethod       # Método HTTP parseado
-    path*: string                  # Ruta de la URL solicitada
-    query*: Table[string, string]  # Parámetros de la URL (?key=value)
-    params*: Table[string, string] # Parámetros de la ruta (/users/{id})
-    body*: string                  # Cuerpo de la petición puro
-    jsonBody*: JsonNode # Cuerpo parseado como JSON si content-type es aplication/json
-
-  TpResponse* = ref object
-    ## Representa una respuesta HTTP saliente
-    code*: HttpCode       # Código de estado HTTP (ej: Http200)
-    headers*: HttpHeaders # Cabeceras de la respuesta
-    body*: string         # Cuerpo de la respuesta
-
-  TpContext* = ref object
-    ## Contexto actual de ejecución para un Handler
-    req*: TpRequest
-    res*: TpResponse
-    logger*: TpLogger
+  MessageResponse* = object
+    message*: string
+    status*: string
 
   TpHandler* = proc(ctx: TpContext): Future[void] {.closure, gcsafe.}
     ## Firma estándar de un controlador / manejador de ruta en Talpiko
+
+  TpMiddleware* = proc(ctx: TpContext): Future[bool] {.closure, gcsafe.}
+    ## Firma de un middleware. Si retorna false, se detiene la cadena.
 
   TpErrorResponse* = object
     ## Modelo estándar para respuestas de error de la API
@@ -178,26 +195,27 @@ type
     message*: string
     status*: string = "error"
 
-proc newTpResponse*(code: HttpCode = Http200, body: string = "",
-    contentType: string = "text/plain"): TpResponse =
-  ## Crea una nueva respuesta base.
-  result = new TpResponse
-  result.code = code
-  result.body = body
-  result.headers = newHttpHeaders([("Content-Type", contentType)])
+when not defined(js) and not defined(wasm):
+  proc newTpResponse*(code: HttpCode = Http200, body: string = "",
+      contentType: string = "text/plain"): TpResponse =
+    ## Crea una nueva respuesta base.
+    result = new TpResponse
+    result.code = code
+    result.body = body
+    result.headers = newHttpHeaders([("Content-Type", contentType)])
 
-proc json*(res: TpResponse, data: JsonNode, code: HttpCode = Http200) =
-  ## Modifica la respuesta para devolver JSON
-  res.code = code
-  res.body = $data
-  res.headers["Content-Type"] = "application/json"
+  proc json*(res: TpResponse, data: JsonNode, code: HttpCode = Http200) =
+    ## Modifica la respuesta para devolver JSON
+    res.code = code
+    res.body = $data
+    res.headers["Content-Type"] = "application/json"
 
-proc html*(res: TpResponse, htmlStr: string, code: HttpCode = Http200) =
-  ## Modifica la respuesta para devolver HTML
-  res.code = code
-  res.body = htmlStr
-  res.headers["Content-Type"] = "text/html"
+  proc html*(res: TpResponse, htmlStr: string, code: HttpCode = Http200) =
+    ## Modifica la respuesta para devolver HTML
+    res.code = code
+    res.body = htmlStr
+    res.headers["Content-Type"] = "text/html"
 
-proc status*(res: TpResponse, code: HttpCode) =
-  ## Solo ajusta el código de status
-  res.code = code
+  proc status*(res: TpResponse, code: HttpCode) =
+    ## Solo ajusta el código de status
+    res.code = code

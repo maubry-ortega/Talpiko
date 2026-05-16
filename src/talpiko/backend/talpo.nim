@@ -4,15 +4,20 @@
 import asyncdispatch, json, tables, httpcore, strutils
 import ./core/types
 import ./core/logging
+import ./core/db
 import ./core/di/container
 import ./web/server
-import ./web/router
+import ./web/router except parseSegments, TpRouteSegment, TpRouteEntry
 import ./web/context
 import ./web/rpc
+import ./web/middleware
 
 export asyncdispatch, json, tables, httpcore, strutils
-export types, logging, container
-export server, router, context, rpc
+export types, logging, container, db
+export types, logging, context, server, rpc, middleware, db
+export router.TpRouter, router.newTpRouter, router.addRoute, router.matchRoute
+export router.tpRoute, router.get, router.post, router.put, router.delete,
+    router.patch, router.options, router.use
 
 # Instancia global de la aplicación (para facilidad de uso)
 var tpApp* = newTpServer()

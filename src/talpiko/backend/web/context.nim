@@ -11,18 +11,20 @@
 import tables, httpcore
 import ../core/types
 import ../core/logging
-import ../core/serialize   # static buffer serializer
+import ../core/serialize # static buffer serializer
 
 # ── Factory ──────────────────────────────────────────────────────────────────
 
-proc newTpContext*(req: TpRequest, res: TpResponse, logger: TpLogger): TpContext =
+proc newTpContext*(req: TpRequest, res: TpResponse,
+    logger: TpLogger): TpContext =
   ## Crea un nuevo contexto para una petición.
   result = new TpContext
   result.req = req
   result.res = res
   result.logger = logger
 
-proc resetTpContext*(ctx: TpContext, req: TpRequest, res: TpResponse) {.inline.} =
+proc resetTpContext*(ctx: TpContext, req: TpRequest,
+    res: TpResponse) {.inline.} =
   ## Reinicia el contexto para reutilización en el pool.
   ## No desaloca ningún objeto — sólo actualiza las referencias.
   ctx.req = req
@@ -73,13 +75,23 @@ proc send*(ctx: TpContext, body: string, code: HttpCode = Http200) =
 # ── Request accessors ────────────────────────────────────────────────────────
 
 proc params*(ctx: TpContext): Table[string, string] = ctx.req.params
-proc query*(ctx: TpContext): Table[string, string]  = ctx.req.query
-proc body*(ctx: TpContext): string                  = ctx.req.body
+proc query*(ctx: TpContext): Table[string, string] = ctx.req.query
+proc body*(ctx: TpContext): string = ctx.req.body
 
-proc getParam*(ctx: TpContext, key: string, default: string = ""): string {.inline.} =
+proc getParam*(ctx: TpContext, key: string,
+    default: string = ""): string {.inline.} =
   ## Obtiene un parámetro de la ruta (/users/:id → getParam("id")).
   result = ctx.req.params.getOrDefault(key, default)
 
-proc getQuery*(ctx: TpContext, key: string, default: string = ""): string {.inline.} =
+proc getQuery*(ctx: TpContext, key: string,
+    default: string = ""): string {.inline.} =
   ## Obtiene un parámetro de la query string (?page=2 → getQuery("page")).
   result = ctx.req.query.getOrDefault(key, default)
+
+proc getHeader*(ctx: TpContext, key: string,
+    default: string = ""): string {.inline.} =
+  ## Obtiene una cabecera de la petición.
+  if ctx.req.req.headers.hasKey(key):
+    result = ctx.req.req.headers[key]
+  else:
+    result = default
